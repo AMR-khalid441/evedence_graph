@@ -82,10 +82,37 @@ Desktop.ini
 # ==============================
 *.log
 logs/
-assets/files/
-assets/database/
 mongodata/
 tempCodeRunnerFile.py
+
+# Assets folder - ignore all uploaded files (images, PDFs, documents, etc.)
+src/assets/files/
+src/assets/database/
+src/assets/**/*
+!src/assets/**/.gitkeep
+!src/assets/**/__init__.py
+
+# Common uploaded file types in assets (only in assets folder)
+src/assets/**/*.jpg
+src/assets/**/*.jpeg
+src/assets/**/*.png
+src/assets/**/*.gif
+src/assets/**/*.bmp
+src/assets/**/*.svg
+src/assets/**/*.webp
+src/assets/**/*.ico
+src/assets/**/*.pdf
+src/assets/**/*.doc
+src/assets/**/*.docx
+src/assets/**/*.xls
+src/assets/**/*.xlsx
+src/assets/**/*.ppt
+src/assets/**/*.pptx
+src/assets/**/*.zip
+src/assets/**/*.rar
+src/assets/**/*.7z
+src/assets/**/*.tar
+src/assets/**/*.gz
 
 # Docker
 src/Docker/.env
