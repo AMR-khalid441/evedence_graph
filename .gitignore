@@ -1,0 +1,91 @@
+# ==============================
+# Secrets & credentials (never commit)
+# ==============================
+.env
+.env.*
+!.env.example
+*.env
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+credentials/
+*.credentials
+config.local.*
+*.secret
+
+# ==============================
+# Python
+# ==============================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
+
+# ==============================
+# Virtual environments
+# ==============================
+.venv/
+venv/
+ENV/
+env/
+.env/
+
+# ==============================
+# IDE / Editor
+# ==============================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# ==============================
+# OS
+# ==============================
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ==============================
+# Project-specific
+# ==============================
+*.log
+logs/
+assets/files/
+assets/database/
+mongodata/
+tempCodeRunnerFile.py
+
+# Docker
+src/Docker/.env
