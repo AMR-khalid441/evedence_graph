@@ -5,11 +5,11 @@ from helpers.config import get_settings, Settings
 from controllers import BaseController
 from controllers import ProjectController
 from controllers import DataController
-from controllers import ProcessController
+from controllers import ProcessController, PmcProcessController
 import aiofiles
 from models import ResponseSignal
 import logging
-from .schemes import ProcessRequest
+from .schemes import ProcessRequest, PmcProcessRequest
 logger = logging.getLogger('uvicorn.error')
 
 data_router = APIRouter(
@@ -90,3 +90,40 @@ async def process_endpoint(project_id: str, process_request: ProcessRequest):
         )
 
     return file_chunks
+
+
+@data_router.post("/process_pmc_article")
+async def process_pmc_article_endpoint(process_request: PmcProcessRequest):
+
+    doc_id = process_request.doc_id
+    chunk_size = process_request.chunk_size
+    overlap_size = process_request.overlap_size
+
+    pmc_process_controller = PmcProcessController()
+
+    file_chunks = pmc_process_controller.process_article(
+        doc_id=doc_id,
+        chunk_size=chunk_size,
+        overlap_size=overlap_size,
+    )
+
+    if file_chunks is None or len(file_chunks) == 0:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "signal": ResponseSignal.PROCESSING_FAILED.value
+            }
+        )
+
+    # Explicitly shape the response so we do not expose any internal
+    # Document.id field (which would otherwise appear as `id: null`).
+    serialized_chunks = [
+        {
+            "page_content": doc.page_content,
+            "metadata": doc.metadata,
+            "type": "Document",
+        }
+        for doc in file_chunks
+    ]
+
+    return serialized_chunks
