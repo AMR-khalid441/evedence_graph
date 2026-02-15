@@ -89,7 +89,15 @@ async def process_endpoint(project_id: str, process_request: ProcessRequest):
             }
         )
 
-    return file_chunks
+    serialized_chunks = [
+        {
+            "page_content": doc.page_content,
+            "metadata": doc.metadata,
+            "type": "Document",
+        }
+        for doc in file_chunks
+    ]
+    return serialized_chunks
 
 
 @data_router.post("/process_pmc_article")
@@ -115,8 +123,7 @@ async def process_pmc_article_endpoint(process_request: PmcProcessRequest):
             }
         )
 
-    # Explicitly shape the response so we do not expose any internal
-    # Document.id field (which would otherwise appear as `id: null`).
+
     serialized_chunks = [
         {
             "page_content": doc.page_content,

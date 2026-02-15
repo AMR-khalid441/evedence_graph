@@ -16,7 +16,7 @@ class PmcScraperService:
     Service that crawls PMC search results, scrapes target sections,
     and persists them via a `PaperRepository`.
 
-    It preserves the existing behavior and JSON shape from `scrapping_service.py.py`,
+    It preserves the existing behavior and JSON shape from the legacy scraping script,
     with the business rule that each stored paper must have at least one of the
     target sections (e.g. "Results" or "Discussion").
     """
