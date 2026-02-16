@@ -4,7 +4,7 @@ from typing import List
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from .BaseController import BaseController
+from .base_controller import BaseController
 
 
 class PmcProcessController(BaseController):
@@ -18,6 +18,14 @@ class PmcProcessController(BaseController):
         # `base_dir` from BaseController points at the `src` directory.
         # PMC JSON articles live in the project-level `pmc_articles/` folder.
         self.pmc_articles_dir = Path(self.base_dir).parent / "pmc_articles"
+
+    def list_doc_ids(self) -> List[str]:
+        """
+        Return sorted list of available PMC doc_ids (JSON filenames without .json).
+        """
+        if not self.pmc_articles_dir.exists():
+            return []
+        return sorted(p.stem for p in self.pmc_articles_dir.glob("*.json"))
 
     def _load_article(self, doc_id: str) -> dict:
         """
@@ -97,4 +105,3 @@ class PmcProcessController(BaseController):
             all_chunks.extend(docs)
 
         return all_chunks
-

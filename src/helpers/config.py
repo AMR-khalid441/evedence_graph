@@ -1,8 +1,17 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
 from typing import Optional
+from dotenv import load_dotenv
 
-env_path = Path(__file__).parent.parent / ".env"
+# Load .env from src/ or project root (resolve to absolute path so it works from any cwd)
+_base = Path(__file__).resolve().parent.parent  # src/
+_env_src = _base / ".env"
+_env_root = _base.parent / ".env"
+env_path = _env_src if _env_src.exists() else _env_root
+
+# Explicitly load .env file for robustness (before pydantic-settings reads it)
+load_dotenv(_env_src, override=False)
+load_dotenv(_env_root, override=False)
 
 
 class Settings(BaseSettings):
@@ -24,9 +33,21 @@ class Settings(BaseSettings):
     # Vector DB store
     VECTOR_DB_PATH: str = "qdrant_data"
     VECTOR_DB_DISTANCE_METHOD: str = "cosine"
+    QDRANT_KEY: Optional[str] = None  # API key for Qdrant Cloud
+    QDRANT_CLUSTER_URL: Optional[str] = None  # Cloud cluster URL
 
-    class Config:
-        env_file = env_path
+    # Ingest (LLM + Vector DB for chunk → embed → store)
+    LLM_PROVIDER: str = "OPENAI"
+    VECTOR_DB_PROVIDER: str = "QDRANT"
+    EMBEDDING_MODEL_ID: str = "text-embedding-3-large"  # Best accuracy: 0.811 vs 0.762 for small
+    EMBEDDING_SIZE: int = 3072  # text-embedding-3-large uses 3072 dimensions
+    GENERATION_MODEL_ID: str = "gpt-4o"  # Best accuracy: flagship model, better than gpt-4o-mini
+
+    model_config = SettingsConfigDict(
+        env_file=str(env_path) if env_path.exists() else None,
+        env_file_encoding='utf-8',
+        case_sensitive=False,
+    )
 
 def get_settings():
     return Settings()

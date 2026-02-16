@@ -1,7 +1,10 @@
-from ..LLMInterface import LLMInterface
-from ..LLMEnums import OpenAIEnums
-from openai import OpenAI
 import logging
+
+from openai import OpenAI
+
+from ..llm_interface import LLMInterface
+from ..llm_enums import OpenAIEnums
+
 
 class OpenAIProvider(LLMInterface):
 
@@ -22,10 +25,13 @@ class OpenAIProvider(LLMInterface):
         self.embedding_model_id = None
         self.embedding_size = None
 
-        self.client = OpenAI(
-            api_key = self.api_key,
-            api_url = self.api_url
-        )
+        # Initialize OpenAI client. For the standard OpenAI API we only need the api_key.
+        # If a custom API URL is provided (e.g. proxy), use it as base_url for the 1.x client.
+        client_kwargs = {"api_key": self.api_key}
+        if self.api_url:
+            client_kwargs["base_url"] = self.api_url
+
+        self.client = OpenAI(**client_kwargs)
 
         self.logger = logging.getLogger(__name__)
 
@@ -68,7 +74,14 @@ class OpenAIProvider(LLMInterface):
             self.logger.error("Error while generating text with OpenAI")
             return None
 
-        return response.choices[0].message["content"]
+        # For openai>=1.x, message is a ChatCompletionMessage object
+        message = response.choices[0].message
+        content = getattr(message, "content", None)
+        if content is None:
+            self.logger.error("OpenAI message content is empty")
+            return None
+
+        return content
 
 
     def embed_text(self, text: str, document_type: str = None):
@@ -97,8 +110,3 @@ class OpenAIProvider(LLMInterface):
             "role": role,
             "content": self.process_text(prompt)
         }
-    
-
-
-    
-

@@ -14,4 +14,3 @@ class PmcProcessRequest(BaseModel):
     doc_id: str
     chunk_size: Optional[int] = 800
     overlap_size: Optional[int] = 80
-
