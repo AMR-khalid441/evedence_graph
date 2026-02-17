@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL_ID: str = "text-embedding-3-large"  # Best accuracy: 0.811 vs 0.762 for small
     EMBEDDING_SIZE: int = 3072  # text-embedding-3-large uses 3072 dimensions
     GENERATION_MODEL_ID: str = "gpt-4o"  # Best accuracy: flagship model, better than gpt-4o-mini
+    MIN_SCORE_THRESHOLD: float = 0.4  # Min similarity (0-1) for RAG chunks; chunks below this are filtered out
 
     model_config = SettingsConfigDict(
         env_file=str(env_path) if env_path.exists() else None,

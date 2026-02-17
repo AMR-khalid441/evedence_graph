@@ -13,9 +13,6 @@ nlp_router = APIRouter(
     tags=["api_v1", "nlp"],
 )
 
-# Minimum similarity score for a chunk to be sent to the LLM.
-MIN_SCORE_THRESHOLD = 0.4
-
 
 class RetrievedDocument(BaseModel):
     text: str
@@ -108,7 +105,7 @@ async def nlp_query_endpoint(
     RAG query endpoint using official Qdrant query_points method.
     - Embeds the query.
     - Uses Qdrant's query_points() for similarity search.
-    - Filters chunks below MIN_SCORE_THRESHOLD.
+    - Filters chunks below app_settings.MIN_SCORE_THRESHOLD.
     - Builds a prompt from the top-k retrieved chunks.
     - Generates an answer with llm.generate_text.
     - Returns answer and chunks_used.
@@ -150,7 +147,7 @@ async def nlp_query_endpoint(
         metadata = payload.get("metadata", {}) or {}
         similarity = max(0.0, min(1.0, hit.score))
 
-        if similarity >= MIN_SCORE_THRESHOLD:
+        if similarity >= app_settings.MIN_SCORE_THRESHOLD:
             chunks_used.append(
                 RetrievedDocument(text=text, metadata=metadata, score=similarity)
             )
