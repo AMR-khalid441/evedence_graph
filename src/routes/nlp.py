@@ -186,10 +186,7 @@ EXCERPTS:
 
 ANSWER:"""
 
-    # ✅ BULLETPROOF truncation fix:
-    # Set the limit to the exact length of the prompt so process_text()
-    # inside the provider can NEVER truncate it, regardless of which
-    # version of the provider is running.
+
     llm.default_input_max_characters = len(prompt) + 100
 
     llm.set_generation_model(app_settings.GENERATION_MODEL_ID)
