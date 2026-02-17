@@ -25,8 +25,7 @@ class OpenAIProvider(LLMInterface):
         self.embedding_model_id = None
         self.embedding_size = None
 
-        # Initialize OpenAI client. For the standard OpenAI API we only need the api_key.
-        # If a custom API URL is provided (e.g. proxy), use it as base_url for the 1.x client.
+ 
         client_kwargs = {"api_key": self.api_key}
         if self.api_url:
             client_kwargs["base_url"] = self.api_url
@@ -42,11 +41,13 @@ class OpenAIProvider(LLMInterface):
         self.embedding_model_id = model_id
         self.embedding_size = embedding_size
 
-    def process_text(self, text: str):
-        return text[:self.default_input_max_characters].strip()
+    def process_text(self, text: str, max_characters: int = None):
+
+        limit = max_characters if max_characters is not None else self.default_input_max_characters
+        return text[:limit].strip()
 
     def generate_text(self, prompt: str, chat_history: list=[], max_output_tokens: int=None,
-                            temperature: float = None):
+                            temperature: float=None, max_input_characters: int=None):
         
         if not self.client:
             self.logger.error("OpenAI client was not set")
@@ -59,22 +60,26 @@ class OpenAIProvider(LLMInterface):
         max_output_tokens = max_output_tokens if max_output_tokens else self.default_generation_max_output_tokens
         temperature = temperature if temperature else self.default_generation_temperature
 
+        
         chat_history.append(
-            self.construct_prompt(prompt=prompt, role=OpenAIEnums.USER.value)
+            self.construct_prompt(
+                prompt=prompt,
+                role=OpenAIEnums.USER.value,
+                max_input_characters=max_input_characters,
+            )
         )
 
         response = self.client.chat.completions.create(
-            model = self.generation_model_id,
-            messages = chat_history,
-            max_tokens = max_output_tokens,
-            temperature = temperature
+            model=self.generation_model_id,
+            messages=chat_history,
+            max_tokens=max_output_tokens,
+            temperature=temperature,
         )
 
         if not response or not response.choices or len(response.choices) == 0 or not response.choices[0].message:
             self.logger.error("Error while generating text with OpenAI")
             return None
 
-        # For openai>=1.x, message is a ChatCompletionMessage object
         message = response.choices[0].message
         content = getattr(message, "content", None)
         if content is None:
@@ -83,8 +88,7 @@ class OpenAIProvider(LLMInterface):
 
         return content
 
-
-    def embed_text(self, text: str, document_type: str = None):
+    def embed_text(self, text: str, document_type: str=None):
         
         if not self.client:
             self.logger.error("OpenAI client was not set")
@@ -95,8 +99,8 @@ class OpenAIProvider(LLMInterface):
             return None
         
         response = self.client.embeddings.create(
-            model = self.embedding_model_id,
-            input = text,
+            model=self.embedding_model_id,
+            input=text,
         )
 
         if not response or not response.data or len(response.data) == 0 or not response.data[0].embedding:
@@ -105,8 +109,9 @@ class OpenAIProvider(LLMInterface):
 
         return response.data[0].embedding
 
-    def construct_prompt(self, prompt: str, role: str):
+    def construct_prompt(self, prompt: str, role: str, max_input_characters: int=None):
         return {
             "role": role,
-            "content": self.process_text(prompt)
+          
+            "content": self.process_text(prompt, max_characters=max_input_characters),
         }

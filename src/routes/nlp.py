@@ -13,6 +13,9 @@ nlp_router = APIRouter(
     tags=["api_v1", "nlp"],
 )
 
+# Minimum similarity score for a chunk to be sent to the LLM.
+MIN_SCORE_THRESHOLD = 0.4
+
 
 class RetrievedDocument(BaseModel):
     text: str
@@ -21,9 +24,6 @@ class RetrievedDocument(BaseModel):
 
 
 def _get_qdrant_client(app_settings: Settings) -> QdrantClient:
-    """
-    Create QdrantClient - Qdrant Cloud required (QDRANT_CLUSTER_URL and QDRANT_KEY).
-    """
     url = getattr(app_settings, 'QDRANT_CLUSTER_URL', None) or ''
     api_key = getattr(app_settings, 'QDRANT_KEY', None) or ''
     if not url or not api_key:
@@ -35,10 +35,6 @@ def _get_qdrant_client(app_settings: Settings) -> QdrantClient:
 
 
 def _embed_query(query: str, app_settings: Settings):
-    """
-    Use the configured LLM provider to embed a query string.
-    Returns (llm, query_vector).
-    """
     llm_factory = LLMProviderFactory(app_settings)
     llm = llm_factory.create(app_settings.LLM_PROVIDER)
     if llm is None:
@@ -68,19 +64,15 @@ async def nlp_search_endpoint(
     - Uses Qdrant's query_points() method for similarity search.
     - Returns chunks with text, metadata, and score.
     """
-    # Embed query
     _, query_vector = _embed_query(request.query, app_settings)
-
     client = _get_qdrant_client(app_settings)
 
-    # Ensure collection exists
     if not client.collection_exists(request.collection_name):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Collection '{request.collection_name}' does not exist",
         )
 
-    # Use official Qdrant query_points method - handles similarity calculation automatically
     try:
         resp = client.query_points(
             collection_name=request.collection_name,
@@ -95,19 +87,14 @@ async def nlp_search_endpoint(
             detail=f"Qdrant search failed: {e}",
         )
 
-    # Convert hits to response format
     chunks = []
     for hit in hits:
         payload = hit.payload or {}
         text = payload.get("text", "")
         metadata = payload.get("metadata", {}) or {}
-        chunks.append(
-            {
-                "text": text,
-                "metadata": metadata,
-                "score": hit.score,  # Score already calculated by Qdrant
-            }
-        )
+        similarity = max(0.0, min(1.0, hit.score))
+
+        chunks.append({"text": text, "metadata": metadata, "score": similarity})
 
     return {"chunks": chunks}
 
@@ -121,13 +108,12 @@ async def nlp_query_endpoint(
     RAG query endpoint using official Qdrant query_points method.
     - Embeds the query.
     - Uses Qdrant's query_points() for similarity search.
+    - Filters chunks below MIN_SCORE_THRESHOLD.
     - Builds a prompt from the top-k retrieved chunks.
     - Generates an answer with llm.generate_text.
     - Returns answer and chunks_used.
     """
-    # LLM + embedding
     llm, query_vector = _embed_query(request.query, app_settings)
-
     client = _get_qdrant_client(app_settings)
 
     if not client.collection_exists(request.collection_name):
@@ -136,7 +122,6 @@ async def nlp_query_endpoint(
             detail=f"Collection '{request.collection_name}' does not exist",
         )
 
-    # Use official Qdrant query_points method - handles similarity calculation automatically
     try:
         resp = client.query_points(
             collection_name=request.collection_name,
@@ -157,28 +142,56 @@ async def nlp_query_endpoint(
             detail="No relevant chunks found",
         )
 
-    # Convert hits to RetrievedDocument format
+    # Filter out low-relevance chunks
     chunks_used: list[RetrievedDocument] = []
     for hit in hits:
         payload = hit.payload or {}
         text = payload.get("text", "")
         metadata = payload.get("metadata", {}) or {}
-        chunks_used.append(
-            RetrievedDocument(text=text, metadata=metadata, score=hit.score)
-        )
+        similarity = max(0.0, min(1.0, hit.score))
 
-    # Build prompt from chunks
+        if similarity >= MIN_SCORE_THRESHOLD:
+            chunks_used.append(
+                RetrievedDocument(text=text, metadata=metadata, score=similarity)
+            )
+
+    if not chunks_used:
+        return {
+            "answer": "I don't have enough information to answer this question.",
+            "chunks_used": [],
+        }
+
+    # Label each chunk with its relevance score
     chunk_texts = "\n\n---\n\n".join(
-        f"[{i+1}] {doc.text}" for i, doc in enumerate(chunks_used)
-    )
-    prompt = (
-        "Answer the question based only on the following excerpts. "
-        "If the excerpts do not contain enough information, say so.\n\n"
-        f"Question: {request.query}\n\n"
-        f"Excerpts:\n{chunk_texts}"
+        f"[{i+1}] (Relevance: {doc.score:.2f})\n{doc.text}"
+        for i, doc in enumerate(chunks_used)
     )
 
-    # Generation model
+    prompt = f"""You are a question-answering assistant. Your ONLY job is to extract and return the answer from the excerpts provided below.
+
+STRICT RULES — follow these exactly:
+- You MUST answer using the excerpts. They are your only source of truth.
+- If the answer is present in the excerpts, state it clearly and directly. Do NOT say you lack information.
+- Excerpts with a Relevance score above 0.60 are highly relevant — treat them as authoritative.
+- Cite the excerpt number inline (e.g. "According to [1]...").
+- After your answer, add a single line: "Confidence: X%" where X reflects how completely the excerpts cover the question (90-100% if fully answered, 50-89% if partially, below 50% if very incomplete).
+- Only say "I don't have enough information to answer this question." if NONE of the excerpts contain any information related to the question whatsoever.
+- Do NOT make up or infer any statistics, names, or facts not explicitly written in the excerpts.
+
+QUESTION:
+{request.query}
+
+EXCERPTS:
+{chunk_texts}
+
+ANSWER:"""
+
+    # ✅ BULLETPROOF truncation fix:
+    # Set the limit to the exact length of the prompt so process_text()
+    # inside the provider can NEVER truncate it, regardless of which
+    # version of the provider is running.
+    llm.default_input_max_characters = len(prompt) + 100
+
     llm.set_generation_model(app_settings.GENERATION_MODEL_ID)
     answer = llm.generate_text(prompt, chat_history=[])
     if answer is None:
