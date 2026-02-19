@@ -38,6 +38,10 @@ class PmcProcessController(BaseController):
         with path.open("r", encoding="utf-8") as f:
             return json.load(f)
 
+    def load_article(self, doc_id: str) -> dict:
+        """Load a PMC article JSON by doc_id. Public wrapper for _load_article."""
+        return self._load_article(doc_id=doc_id)
+
     def process_article(
         self,
         doc_id: str,

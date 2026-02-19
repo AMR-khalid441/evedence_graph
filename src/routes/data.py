@@ -1,13 +1,13 @@
 from fastapi import FastAPI, APIRouter, Depends, UploadFile, status
 from fastapi.responses import JSONResponse
 import os
-from helpers.config import get_settings, Settings
-from controllers import BaseController
-from controllers import ProjectController
-from controllers import DataController
-from controllers import ProcessController, PmcProcessController
+from src.helpers.config import get_settings, Settings
+from src.controllers import BaseController
+from src.controllers import ProjectController
+from src.controllers import DataController
+from src.controllers import ProcessController, PmcProcessController
 import aiofiles
-from models import ResponseSignal
+from src.models import ResponseSignal
 import logging
 from .schemes import (
     ProcessRequest,
@@ -15,8 +15,10 @@ from .schemes import (
     BatchPmcProcessRequest,
     IngestPmcRequest,
 )
-from stores.llm.llm_provider_factory import LLMProviderFactory
-from stores.vectordb.vector_db_provider_factory import VectorDBProviderFactory
+from src.stores.llm.llm_provider_factory import LLMProviderFactory
+from src.stores.llm.embedding_defaults import EMBEDDING_DEFAULTS
+from src.stores.vectordb.vector_db_provider_factory import VectorDBProviderFactory
+from src.services.biomedical_chunker import chunk_paper_sections
 logger = logging.getLogger('uvicorn.error')
 
 data_router = APIRouter(
@@ -194,49 +196,92 @@ async def ingest_pmc_article_endpoint(
     doc_id = ingest_request.doc_id
     collection_name = ingest_request.collection_name
     chunk_size = ingest_request.chunk_size
-    overlap_size = ingest_request.overlap_size
+    overlap_size = ingest_request.overlap_size or 80
 
+    provider = ingest_request.embedding_provider or app_settings.LLM_PROVIDER
+    defaults = EMBEDDING_DEFAULTS.get(provider)
+    if defaults:
+        default_model, default_size = defaults
+    else:
+        default_model = app_settings.EMBEDDING_MODEL_ID
+        default_size = app_settings.EMBEDDING_SIZE
+    model_id = default_model
+    embedding_size = default_size
+
+    # Backward compat: if chunking_strategy omitted and provider is SENTENCE_TRANSFORMERS, infer BIOMEDICAL
+    chunking_strategy = ingest_request.chunking_strategy
+    if chunking_strategy is None and provider == "SENTENCE_TRANSFORMERS":
+        chunking_strategy = "BIOMEDICAL"
+    elif chunking_strategy is None:
+        chunking_strategy = "CHARACTER"
+
+    pmc_controller = PmcProcessController()
+
+    # --- Chunking branch ---
     try:
-        pmc_controller = PmcProcessController()
-        chunks = pmc_controller.process_article(
-            doc_id=doc_id,
-            chunk_size=chunk_size,
-            overlap_size=overlap_size,
-        )
+        if chunking_strategy == "BIOMEDICAL":
+            article = pmc_controller.load_article(doc_id=doc_id)
+            doc_title = article.get("doc_title", "")
+            source_url = article.get("source_url", "")
+            sections = article.get("sections", [])
+            sections_dict = {
+                s["title"]: s.get("text", "") or ""
+                for s in sorted(sections, key=lambda x: x.get("order", 0))
+            }
+            max_tokens = min(chunk_size or 480, 512)
+            raw_chunks = chunk_paper_sections(
+                sections=sections_dict,
+                doc_id=article.get("doc_id", doc_id),
+                doc_title=doc_title,
+                source_url=source_url,
+                max_tokens=max_tokens,
+                overlap_tokens=overlap_size,
+                word_overlap=10,
+            )
+            chunks = [{"text": c["text"], "metadata": c["metadata"]} for c in raw_chunks]
+        else:
+            char_chunk_size = chunk_size or 800
+            docs = pmc_controller.process_article(
+                doc_id=doc_id,
+                chunk_size=char_chunk_size,
+                overlap_size=overlap_size,
+            )
+            chunks = [{"text": d.page_content, "metadata": d.metadata} for d in docs]
     except FileNotFoundError as e:
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
             content={"error": str(e)},
         )
 
-    if not chunks or len(chunks) == 0:
+    if not chunks:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"error": "No chunks produced"},
         )
 
+    # --- Embedding branch ---
     llm_factory = LLMProviderFactory(app_settings)
-    llm = llm_factory.create(app_settings.LLM_PROVIDER)
+    llm = llm_factory.create(provider)
     if llm is None:
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": f"LLM provider not available: {app_settings.LLM_PROVIDER}"},
+            content={"error": f"LLM provider not available: {provider}"},
         )
-    llm.set_embedding_model(app_settings.EMBEDDING_MODEL_ID, app_settings.EMBEDDING_SIZE)
+    llm.set_embedding_model(model_id, embedding_size)
 
     texts = []
     vectors = []
     metadata_list = []
-    for i, doc in enumerate(chunks):
-        vec = llm.embed_text(doc.page_content)
+    for i, chunk in enumerate(chunks):
+        vec = llm.embed_text(chunk["text"])
         if vec is None:
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content={"error": f"Embedding failed for chunk index {i}"},
             )
-        texts.append(doc.page_content)
+        texts.append(chunk["text"])
         vectors.append(vec)
-        metadata_list.append(doc.metadata)
+        metadata_list.append(chunk["metadata"])
 
     vdb_factory = VectorDBProviderFactory(app_settings)
     try:
@@ -258,7 +303,7 @@ async def ingest_pmc_article_endpoint(
         if not exists:
             await vector_db.create_collection_async(
                 collection_name=collection_name,
-                embedding_size=app_settings.EMBEDDING_SIZE,
+                embedding_size=embedding_size,
                 do_reset=False,
             )
         ok = await vector_db.insert_many_async(

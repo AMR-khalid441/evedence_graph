@@ -5,8 +5,8 @@ SRC_ROOT = Path(__file__).resolve().parents[1]
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from services.repositories import JsonFolderPaperRepository
-from services.pmc_scraper_service import PmcScraperService
+from src.services.repositories import JsonFolderPaperRepository
+from src.services.pmc_scraper_service import PmcScraperService
 
 def main() -> None:
 

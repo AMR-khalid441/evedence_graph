@@ -3,8 +3,9 @@ from pydantic import BaseModel
 
 from qdrant_client import QdrantClient
 
-from helpers.config import get_settings, Settings
-from stores.llm.llm_provider_factory import LLMProviderFactory
+from src.helpers.config import get_settings, Settings
+from src.stores.llm.embedding_defaults import EMBEDDING_DEFAULTS, DIMENSION_TO_PROVIDER
+from src.stores.llm.llm_provider_factory import LLMProviderFactory
 from .schemes import SearchRequest, QueryRequest
 
 
@@ -31,15 +32,45 @@ def _get_qdrant_client(app_settings: Settings) -> QdrantClient:
     return QdrantClient(url=url, api_key=api_key)
 
 
-def _embed_query(query: str, app_settings: Settings):
+def _get_provider_for_collection(client, collection_name: str, app_settings: Settings) -> str:
+    """Auto-detect embedding provider from collection's vector dimension."""
+    info = client.get_collection(collection_name=collection_name)
+    params = getattr(info, "config", None) and getattr(info.config, "params", None)
+    if not params or not params.vectors:
+        return app_settings.LLM_PROVIDER
+    vectors_cfg = params.vectors
+    if hasattr(vectors_cfg, "size"):
+        size = vectors_cfg.size
+    elif isinstance(vectors_cfg, dict):
+        first = next(iter(vectors_cfg.values()), None)
+        size = getattr(first, "size", None) if first else None
+    else:
+        return app_settings.LLM_PROVIDER
+    return DIMENSION_TO_PROVIDER.get(size, app_settings.LLM_PROVIDER)
+
+
+def _embed_query(query: str, app_settings: Settings, embedding_provider: str | None = None, collection_name: str | None = None, client=None):
+    if embedding_provider:
+        provider = embedding_provider
+    elif collection_name and client:
+        provider = _get_provider_for_collection(client, collection_name, app_settings)
+    else:
+        provider = app_settings.LLM_PROVIDER
+    defaults = EMBEDDING_DEFAULTS.get(provider)
+    if defaults:
+        model_id, embedding_size = defaults
+    else:
+        model_id = app_settings.EMBEDDING_MODEL_ID
+        embedding_size = app_settings.EMBEDDING_SIZE
+
     llm_factory = LLMProviderFactory(app_settings)
-    llm = llm_factory.create(app_settings.LLM_PROVIDER)
+    llm = llm_factory.create(provider)
     if llm is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"LLM provider not available: {app_settings.LLM_PROVIDER}",
+            detail=f"LLM provider not available: {provider}",
         )
-    llm.set_embedding_model(app_settings.EMBEDDING_MODEL_ID, app_settings.EMBEDDING_SIZE)
+    llm.set_embedding_model(model_id, embedding_size)
 
     vec = llm.embed_text(query)
     if vec is None:
@@ -58,10 +89,10 @@ async def nlp_search_endpoint(
     """
     Semantic search endpoint using official Qdrant query_points method.
     - Embeds the query via LLMProviderFactory.
+    - Auto-detects embedding provider from collection vector size when not specified.
     - Uses Qdrant's query_points() method for similarity search.
     - Returns chunks with text, metadata, and score.
     """
-    _, query_vector = _embed_query(request.query, app_settings)
     client = _get_qdrant_client(app_settings)
 
     if not client.collection_exists(request.collection_name):
@@ -69,6 +100,14 @@ async def nlp_search_endpoint(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Collection '{request.collection_name}' does not exist",
         )
+
+    _, query_vector = _embed_query(
+        request.query,
+        app_settings,
+        request.embedding_provider,
+        request.collection_name,
+        client,
+    )
 
     try:
         resp = client.query_points(
@@ -84,13 +123,15 @@ async def nlp_search_endpoint(
             detail=f"Qdrant search failed: {e}",
         )
 
+    threshold = request.min_score_threshold
     chunks = []
     for hit in hits:
         payload = hit.payload or {}
         text = payload.get("text", "")
         metadata = payload.get("metadata", {}) or {}
         similarity = max(0.0, min(1.0, hit.score))
-
+        if threshold is not None and similarity < threshold:
+            continue
         chunks.append({"text": text, "metadata": metadata, "score": similarity})
 
     return {"chunks": chunks}
@@ -103,14 +144,13 @@ async def nlp_query_endpoint(
 ):
     """
     RAG query endpoint using official Qdrant query_points method.
-    - Embeds the query.
+    - Embeds the query. Auto-detects embedding provider from collection when not specified.
     - Uses Qdrant's query_points() for similarity search.
     - Filters chunks below app_settings.MIN_SCORE_THRESHOLD.
     - Builds a prompt from the top-k retrieved chunks.
     - Generates an answer with llm.generate_text.
     - Returns answer and chunks_used.
     """
-    llm, query_vector = _embed_query(request.query, app_settings)
     client = _get_qdrant_client(app_settings)
 
     if not client.collection_exists(request.collection_name):
@@ -118,6 +158,14 @@ async def nlp_query_endpoint(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Collection '{request.collection_name}' does not exist",
         )
+
+    llm, query_vector = _embed_query(
+        request.query,
+        app_settings,
+        request.embedding_provider,
+        request.collection_name,
+        client,
+    )
 
     try:
         resp = client.query_points(
@@ -140,6 +188,7 @@ async def nlp_query_endpoint(
         )
 
     # Filter out low-relevance chunks
+    threshold = request.min_score_threshold or app_settings.MIN_SCORE_THRESHOLD
     chunks_used: list[RetrievedDocument] = []
     for hit in hits:
         payload = hit.payload or {}
@@ -147,7 +196,7 @@ async def nlp_query_endpoint(
         metadata = payload.get("metadata", {}) or {}
         similarity = max(0.0, min(1.0, hit.score))
 
-        if similarity >= app_settings.MIN_SCORE_THRESHOLD:
+        if similarity >= threshold:
             chunks_used.append(
                 RetrievedDocument(text=text, metadata=metadata, score=similarity)
             )

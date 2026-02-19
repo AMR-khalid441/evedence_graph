@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 
 from fastapi import UploadFile
-from models import ResponseSignal
+from src.models import ResponseSignal
 
 from .base_controller import BaseController
 from .project_controller import ProjectController

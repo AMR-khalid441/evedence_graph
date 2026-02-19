@@ -7,8 +7,8 @@ from typing import Iterable, List, Optional, Sequence, Tuple
 
 from playwright.sync_api import sync_playwright, Page
 
-from domain import Paper, Section
-from services.interfaces import PaperRepository
+from src.domain import Paper, Section
+from src.services.interfaces import PaperRepository
 
 
 class PmcScraperService:

@@ -1,6 +1,6 @@
 from fastapi import APIRouter ,Depends
 import os
-from helpers.config import get_settings
+from src.helpers.config import get_settings
 # Create router
 base_router = APIRouter(tags=["sanitycheck"])
 

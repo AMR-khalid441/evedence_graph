@@ -3,7 +3,7 @@ from pathlib import Path
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from models import ProcessingEnum, ResponseSignal
+from src.models import ProcessingEnum, ResponseSignal
 
 from .base_controller import BaseController
 from .project_controller import ProjectController

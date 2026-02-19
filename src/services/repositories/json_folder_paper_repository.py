@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 from typing import Union
 
-from domain import Paper
-from services.interfaces import PaperRepository
+from src.domain import Paper
+from src.services.interfaces import PaperRepository
 
 
 class JsonFolderPaperRepository(PaperRepository):

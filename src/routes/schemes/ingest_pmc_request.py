@@ -6,13 +6,25 @@ class IngestPmcRequest(BaseModel):
     """
     Request body for ingesting a PMC article: chunk → embed → vector DB.
 
-    - doc_id: ID of the JSON article file (without .json extension)
-    - collection_name: target vector DB collection name
-    - chunk_size: target maximum length for each chunk body (in characters)
-    - overlap_size: overlap length between consecutive chunks (in characters)
+    Example:
+    {
+      "doc_id": "00c2cfa5-854f-478c-a652-51d4f021579a",
+      "collection_name": "biomedical_mixed",
+      "chunking_strategy": "BIOMEDICAL",
+      "chunk_size": 480,
+      "overlap_size": 80,
+      "embedding_provider": "OPENAI"
+    }
+
+    - chunking_strategy: "CHARACTER" (chars) or "BIOMEDICAL" (tokens). Default: CHARACTER
+    - chunk_size: chars for CHARACTER (default 800), tokens for BIOMEDICAL (default 480)
+    - overlap_size: chars for CHARACTER, tokens for BIOMEDICAL (default 80)
+    - embedding_provider: OPENAI | COHERE | SENTENCE_TRANSFORMERS. Default: config LLM_PROVIDER
     """
 
     doc_id: str
     collection_name: str
-    chunk_size: Optional[int] = 800
+    chunking_strategy: Optional[str] = None
+    chunk_size: Optional[int] = None
     overlap_size: Optional[int] = 80
+    embedding_provider: Optional[str] = None
